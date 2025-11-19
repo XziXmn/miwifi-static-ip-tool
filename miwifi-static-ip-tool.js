@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         小米路由器静态IP管理增强脚本
-// @namespace    kirin-plus
+// @namespace    XziXmn
 // @version      0.5
 // @description  集成通用 AI (OpenAI 兼容 API)，支持分块并发分析 OUI 数据库，具备进度条、中断功能，并可一键下载 AI 分类结果
 // @author       XziXmn
