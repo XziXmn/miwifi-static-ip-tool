@@ -48,7 +48,7 @@
 ## 📥 安装方式
 
 1. 安装浏览器扩展：[Tampermonkey](https://www.tampermonkey.net/) (推荐) 或 Violentmonkey。
-2. **[点击此处一键安装脚本](https://greasyfork.org/zh-CN/scripts/XXXXXX)**
+2. *[[点击此处一键安装脚本]](https://greasyfork.org/zh-CN/scripts/556368-%E5%B0%8F%E7%B1%B3%E8%B7%AF%E7%94%B1%E5%99%A8%E9%9D%99%E6%80%81ip%E7%AE%A1%E7%90%86%E5%A2%9E%E5%BC%BA%E8%84%9A%E6%9C%AC)*
    - 或者：手动新建脚本 -> 粘贴代码 -> 保存。
 3. 登录小米路由器后台（静态 IP 管理页面），右下角会出现悬浮按钮组（⚙️ 和 ➕）。
 
