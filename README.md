@@ -2,7 +2,7 @@
 
 一个为小米/Redmi路由器（AX、BE、RA、RB系列）设计的Tampermonkey用户脚本，让静态IP（MAC绑定）页面更好用。
 
-当前脚本版本：3.8.1（2025年11月社区维护版）  
+当前脚本版本：0.6（2025年11月20日）  
 适用固件：理论上目前为止任何版本
 
 ## 主要功能
@@ -18,16 +18,14 @@
 ## 安装方式
 
 1. 安装 Tampermonkey 或 Violentmonkey 扩展
-2. [点此一键安装](https://greasyfork.org/zh-CN/scripts/XXXXXX)（尚未上传）  
+2. [点此一键安装](https://greasyfork.org/zh-CN/scripts/XXXXXX)
    或手动新建脚本 → 粘贴代码 → 保存
 3. 进入路由器后台即可看到右下角 ⚙️ 和 ➕ 按钮
 
 ## 快速上手
 
-1. 点击 ⚙️ → “立即检查并更新OUI原始库”（只需一次）
-2. （推荐）直接上传社区最新的AI分类数据库（省时省钱）  
-   ↓ 2025.11.19 版
-   （占位）
+1. 点击 ⚙️ → “立即检查并更新OUI原始库”
+2. （推荐）直接上传社区最新的AI分类数据库（[下载](https://raw.githubusercontent.com/XziXmn/miwifi-static-ip-tool/refs/heads/main/xiaomi_ai_vendor_db.json)）  
 3. 勾选「启用AI厂商分类」→ 保存配置 → 刷新页面
 4. 分类和颜色立即生效
 
