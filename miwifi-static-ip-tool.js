@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         小米路由器静态IP管理增强脚本
 // @namespace    XziXmn
-// @version      0.5
+// @version      0.6
 // @description  集成通用 AI (OpenAI 兼容 API)，支持分块并发分析 OUI 数据库，具备进度条、中断功能，并可一键下载 AI 分类结果
 // @author       XziXmn
 // @match        *://*/cgi-bin/luci/;stok=*/*
@@ -126,7 +126,7 @@
             }
         }
 
-        // --- 2. AI 分析核心逻辑 ---
+        // --- 2. AI 分析核心逻辑 (分块并发 + 实时保存 + 中断) ---
 
         /**
          * 原子性地读取、合并并保存 AI 分类数据库。
@@ -192,10 +192,8 @@
             });
         }
 
-        /**
-         * 执行分块并发 AI 分析，并实时更新本地数据库。
-         * @param {function(number, number, number, string|null): void} updateStatusCallback - 实时更新 UI 状态的回调函数。
-         * @param {function(): boolean} checkAbort - 检查中断状态的回调函数。
+/**
+         * 执行分块并发 AI 分析（支持增量更新，自动跳过已分析厂商）
          */
         async function runAiAnalysis(updateStatusCallback, checkAbort) {
             const apiKey = getApiKey();
@@ -203,25 +201,55 @@
                 throw new Error("API Key (Bearer Token) 未设置。");
             }
 
-            // 恢复并发控制，默认并发 3（从配置读取）
             const concurrency = Math.max(1, parseInt(GM_getValue(AI_CONCURRENCY_KEY, 3)) || 3);
-            const { system, uniqueVendors } = getAiPromptParts();
 
-            if (uniqueVendors.length === 0) {
+            // 获取 Prompt 模板和“所有”原始厂商列表
+            const { system, uniqueVendors: allVendors } = getAiPromptParts();
+
+            if (allVendors.length === 0) {
                 throw new Error("OUI 原始数据库中未找到任何厂商名称，请先更新 OUI 原始库。");
             }
 
-            // --- 1. Chunking Logic (每20条一组，保持小块实时保存) ---
-            const CHUNK_SIZE = 20;
-            let chunks = [];
-            for (let i = 0; i < uniqueVendors.length; i += CHUNK_SIZE) {
-                chunks.push(uniqueVendors.slice(i, i + CHUNK_SIZE));
+            // ==================== 【新增逻辑开始】 ====================
+            // 读取本地已有的 AI 数据
+            const aiStr = GM_getValue(AI_DB_KEY);
+            const existingAiData = aiStr ? JSON.parse(aiStr).data : {};
+
+            // 过滤：只保留 AI 库中不存在的厂商 (待处理列表)
+            const pendingVendors = allVendors.filter(vendor => !existingAiData[vendor]);
+
+            const totalRaw = allVendors.length;
+            const skippedCount = totalRaw - pendingVendors.length;
+
+            console.log(`MacDB: 增量分析检查 - 总数: ${totalRaw}, 已存在: ${skippedCount}, 待分析: ${pendingVendors.length}`);
+
+            // 如果所有厂商都已分析过
+            if (pendingVendors.length === 0) {
+                const currentCount = Object.keys(existingAiData).length;
+                updateStatusCallback(0, 0, currentCount, "无需更新");
+                alert(`太棒了！所有 ${totalRaw} 个厂商均已完成分析，无需重复执行。`);
+                return currentCount;
             }
 
-            console.log(`MacDB: 总共分成 ${chunks.length} 个任务块，将以最大 ${concurrency} 并发执行。`);
+            // 只有当有新任务时，才提示用户
+            if (skippedCount > 0) {
+                // 这里的日志会在控制台显示，UI上虽然不能直接弹窗（会阻断），但用户会在进度条看到任务变少了
+                console.log(`已跳过 ${skippedCount} 个已分析的厂商，仅处理剩下的 ${pendingVendors.length} 个。`);
+            }
+            // ==================== 【新增逻辑结束】 ====================
+
+            // --- 1. Chunking Logic (使用 pendingVendors 进行分块) ---
+            const CHUNK_SIZE = 20;
+            let chunks = [];
+            // 注意：这里循环的是 pendingVendors，不是 allVendors
+            for (let i = 0; i < pendingVendors.length; i += CHUNK_SIZE) {
+                chunks.push(pendingVendors.slice(i, i + CHUNK_SIZE));
+            }
+
+            console.log(`MacDB: 实际执行任务块 ${chunks.length} 个 (并发: ${concurrency})`);
 
             let executedTasks = 0;
-            let activeTasks = 0;     // 当前正在进行的任务数
+            let activeTasks = 0;
             let taskIndex = 0;
 
             const executeTask = async (chunkIndex, chunk) => {
@@ -235,17 +263,16 @@
                 try {
                     const result = await callAiAnalysis({ system, user: userPrompt }, apiKey);
 
-                    // 中断期间可能已返回，检查后再保存
                     if (checkAbort()) return;
 
                     const totalCount = updateAiDB(result);
                     executedTasks++;
                     updateStatusCallback(executedTasks, chunks.length, totalCount, null);
 
-                    // 实时追加日志
                     const logArea = document.getElementById('analysis-log');
                     if (logArea) {
-                        logArea.value += `\n\n[任务 ${chunkIndex + 1}/${chunks.length}] 返回结果:\n${JSON.stringify(result, null, 2)}`;
+                        // 优化日志显示：显示具体的增量进度
+                        logArea.value += `\n\n[增量任务 ${chunkIndex + 1}/${chunks.length}] 成功存入 ${Object.keys(result).length} 条:\n${JSON.stringify(result, null, 2)}`;
                         logArea.scrollTop = logArea.scrollHeight;
                     }
                 } catch (e) {
@@ -255,7 +282,7 @@
 
                     const logArea = document.getElementById('analysis-log');
                     if (logArea) {
-                        logArea.value += `\n\n[任务 ${chunkIndex + 1}/${chunks.length}] 失败: ${e.message}`;
+                        logArea.value += `\n\n[增量任务 ${chunkIndex + 1}/${chunks.length}] 失败: ${e.message}`;
                         logArea.scrollTop = logArea.scrollHeight;
                     }
                 } finally {
@@ -263,49 +290,44 @@
                 }
             };
 
-            // --- 2. 精确并发调度器（支持中断）---
+            // --- 2. 调度器 (保持不变) ---
             const scheduler = async () => {
                 while (taskIndex < chunks.length) {
                     if (checkAbort()) break;
-
-                    // 启动新任务直到达到并发上限
                     while (activeTasks < concurrency && taskIndex < chunks.length) {
                         const idx = taskIndex++;
                         const chunk = chunks[idx];
                         activeTasks++;
                         executeTask(idx, chunk).finally(() => {
-                            // 任务结束后自动触发下一轮（如果还有）
                             if (!checkAbort() && taskIndex < chunks.length) {
-                                scheduler(); // 递归触发下一批
+                                scheduler();
                             }
                         });
                     }
-
-                    // 等待任意一个任务完成再继续派发
-                    await new Promise(resolve => setTimeout(resolve, 100)); // 轻量轮询
+                    await new Promise(resolve => setTimeout(resolve, 100));
                 }
             };
 
-            // 启动调度
             await scheduler();
 
-            // 等待所有已派发的任务完成
             while (activeTasks > 0) {
                 if (checkAbort()) break;
                 await new Promise(resolve => setTimeout(resolve, 200));
             }
 
             // --- 3. 结果和通知 ---
+            // 注意：这里重新读取一次最终总数
             const finalCount = Object.keys(JSON.parse(GM_getValue(AI_DB_KEY, '{}')).data || {}).length;
 
             if (checkAbort()) {
                 updateStatusCallback(executedTasks, chunks.length, finalCount, "任务已中断");
-                alert("AI 分析任务已被用户中断。已完成的任务结果已保存。");
-            } else if (finalCount === 0) {
-                throw new Error("所有 AI 分析任务失败或返回空结果。");
+                alert(`任务已中断。本次会话共处理了 ${executedTasks} 个新任务块。`);
+            } else if (executedTasks > 0 && finalCount === Object.keys(existingAiData).length) {
+                // 这种情况比较少见：执行了任务但总数没变（可能是API返回空或全失败）
+                throw new Error("所有新任务看似已执行，但数据库记录数未增加，请检查 API 日志。");
             } else {
                 updateStatusCallback(executedTasks, chunks.length, finalCount, null);
-                alert(`AI 分析完成！总共缓存 ${finalCount} 条分类结果。`);
+                alert(`增量分析完成！\n- 跳过已有：${skippedCount} 条\n- 新增分析：${pendingVendors.length} 条\n- 当前库总计：${finalCount} 条`);
             }
 
             return finalCount;
@@ -495,7 +517,7 @@ JSON 结构必须是：
         return { type: 'OTHER', ...getCategory('OTHER'), aiDescription: null };
     }
 
-    // ==================== D. 样式和 UI 渲染 ====================
+    // ==================== D. 样式和 UI 渲染 (新增进度条样式) ====================
 
     const fix = document.createElement('style');
     fix.textContent = `html, body, #doc, #bd, .inner, .mod-set-nav { overflow: visible !important; height: auto !important; }`;
@@ -756,7 +778,7 @@ JSON 结构必须是：
     }
 
 
-    // --- 2. 设置 Modal ---
+    // --- 2. 设置 Modal (AI 配置) ---
 
     function renderSettingsModal() {
         const modal = document.createElement('div');
@@ -910,8 +932,8 @@ JSON 结构必须是：
             ui.saveBtn.disabled = false;
 
             ui.downloadAiDbBtn.disabled = aiCount === 0;
-            ui.downloadAiDbBtn.textContent = aiCount > 0 
-                ? `下载 AI 分类数据库 (JSON) - ${aiCount} 条` 
+            ui.downloadAiDbBtn.textContent = aiCount > 0
+                ? `下载 AI 分类数据库 (JSON) - ${aiCount} 条`
                 : `下载 AI 分类数据库 (JSON) - 暂无数据`;
         };
 
